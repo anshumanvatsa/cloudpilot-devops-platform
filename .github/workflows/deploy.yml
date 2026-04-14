@@ -1,0 +1,33 @@
+name: DevOps CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build Backend Image
+        run: docker build -t cloudpilot-backend ./backend
+
+      - name: Build Frontend Image
+        run: docker build -t cloudpilot-frontend ./frontend
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Apply Kubernetes Manifests
+        run: |
+          kubectl apply -f k8s/
