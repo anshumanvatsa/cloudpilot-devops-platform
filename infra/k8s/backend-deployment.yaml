@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudpilot-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudpilot-backend
+  template:
+    metadata:
+      labels:
+        app: cloudpilot-backend
+    spec:
+      containers:
+        - name: backend
+          image: your-registry/cloudpilot-backend:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: API_PREFIX
+              value: /api
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudpilot-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudpilot-secrets
+                  key: redis-url
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cloudpilot-secrets
+                  key: secret-key
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudpilot-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: cloudpilot-backend
+  ports:
+    - port: 8000
+      targetPort: 8000
