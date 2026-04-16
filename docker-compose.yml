@@ -1,15 +1,15 @@
+version: "3.9"
+
 services:
   backend:
     build: ./backend
-    ports:
-      - "8000:8000"
     env_file:
       - ./backend/.env
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     restart: always
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
@@ -20,8 +20,6 @@ services:
 
   frontend:
     build: ./frontend
-    ports:
-      - "3000:3000"
     depends_on:
       - backend
     restart: always
@@ -34,8 +32,7 @@ services:
       POSTGRES_DB: appdb
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d appdb"]
       interval: 5s
@@ -45,6 +42,23 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - frontend
+      - backend
+    restart: always
 
 volumes:
   postgres_data:
