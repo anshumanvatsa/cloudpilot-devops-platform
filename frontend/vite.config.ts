@@ -3,50 +3,51 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
-export default defineConfig(({ mode }) => {
-  return {
-    server: {
-      host: true,
-      port: 8080,
-      hmr: {
-        overlay: false,
+export default defineConfig(({ mode }) => ({
+  server: {
+    host: true,
+    port: 8080,
+    hmr: {
+      overlay: false,
+    },
+    proxy: {
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
       },
-      proxy: {
-        "/api": {
-          target: "http://localhost:8000",
-          changeOrigin: true,
-        },
-        "/ws": {
-          target: "ws://localhost:8000",
-          ws: true,
-        },
+      "/ws": {
+        target: "ws://localhost:8000",
+        ws: true,
       },
     },
+  },
 
-    // ✅ FINAL FIX
-    preview: {
-      host: true,
-      port: 3000,
-      allowedHosts: "all",
+  preview: {
+    host: true,
+    port: 3000,
+    allowedHosts: [
+      "localhost",
+      "13.60.57.168",
+      "cloudpilot.13.60.57.168.sslip.io",
+    ],
+  },
+
+  plugins: [
+    react(),
+    mode === "development" && componentTagger(),
+  ].filter(Boolean),
+
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
     },
-
-    plugins: [
-      react(),
-      mode === "development" && componentTagger(),
-    ].filter(Boolean),
-
-    resolve: {
-      alias: {
-        "@": path.resolve(__dirname, "./src"),
-      },
-      dedupe: [
-        "react",
-        "react-dom",
-        "react/jsx-runtime",
-        "react/jsx-dev-runtime",
-        "@tanstack/react-query",
-        "@tanstack/query-core",
-      ],
-    },
-  };
-});
+    dedupe: [
+      "react",
+      "react-dom",
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "@tanstack/react-query",
+      "@tanstack/query-core",
+    ],
+  },
+}));
