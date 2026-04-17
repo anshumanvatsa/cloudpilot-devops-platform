@@ -10,7 +10,7 @@ from core.config import get_settings
 from core.csrf import validate_csrf_token
 from db.session import get_db
 from models.user import User
-from schemas.auth import LoginRequest, TokenResponse, UserResponse
+from schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
 from services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -49,6 +49,12 @@ def login(response: Response, request: Request, payload: LoginRequest, db: Sessi
     )
 
     return token_response
+
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/minute")
+def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)):
+    return AuthService.register(payload, db)
 
 
 @router.post("/refresh", response_model=TokenResponse)

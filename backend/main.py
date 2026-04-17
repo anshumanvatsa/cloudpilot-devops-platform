@@ -57,11 +57,6 @@ register_middleware(app)
 register_exception_handlers(app)
 
 
-@app.get('/health')
-async def healthcheck():
-    return {"status": "ok", "service": settings.app_name}
-
-
 @app.get('/ready')
 async def readiness():
     return {"status": "ready"}
