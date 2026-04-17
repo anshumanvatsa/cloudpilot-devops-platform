@@ -6,6 +6,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    role: str = "user"
+
+
 class RefreshRequest(BaseModel):
     pass
 
