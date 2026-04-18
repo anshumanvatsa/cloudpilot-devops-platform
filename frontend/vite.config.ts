@@ -29,6 +29,8 @@ export default defineConfig(({ mode }) => ({
       "localhost",
       "13.60.57.168",
       "cloudpilot.13.60.57.168.sslip.io",
+      "frontend"
+
     ],
   },
 
