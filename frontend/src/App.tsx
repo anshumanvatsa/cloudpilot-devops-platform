@@ -11,6 +11,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuthStore } from "@/store/authStore";
 
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const DeploymentsPage = lazy(() => import("./pages/DeploymentsPage"));
 const MonitoringPage = lazy(() => import("./pages/MonitoringPage"));
 const LogsPage = lazy(() => import("./pages/LogsPage"));
@@ -35,7 +36,8 @@ function AppContent() {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>
-              <Route path="/" element={<DashboardPage />} />
+              <Route path="/" element={<ProjectsPage />} />
+              <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/deployments" element={<DeploymentsPage />} />
               <Route path="/monitoring" element={<MonitoringPage />} />

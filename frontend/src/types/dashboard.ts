@@ -1,4 +1,11 @@
-export type DeploymentStatus = 'success' | 'failed' | 'pending' | 'building';
+export type DeploymentStatus =
+  | 'success'
+  | 'failed'
+  | 'pending'
+  | 'building'
+  | 'queued'
+  | 'cloning'
+  | 'stopped';
 
 export interface Deployment {
   id: string;
@@ -12,6 +19,11 @@ export interface Deployment {
   timestamp: string;
   cpu: number;
   requestsPerMin: number;
+  // Real deployment fields
+  url: string | null;
+  hostPort: number | null;
+  repoUrl: string | null;
+  imageTag: string | null;
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';

@@ -36,7 +36,7 @@ interface DashboardState {
   triggerDeploy: (serviceId: string) => Promise<void>;
   restartDeployment: (serviceId: string) => Promise<void>;
   rollbackDeployment: (serviceId: string) => Promise<void>;
-  createDeployment: (payload: { name: string; branch?: string; environment?: string; author?: string }) => Promise<void>;
+  createDeployment: (payload: { name: string; repo_url: string; branch?: string; environment?: string; author?: string; port?: number }) => Promise<void>;
   appendMetricFromSocket: (payload: unknown) => void;
   appendLogFromSocket: (payload: unknown) => void;
   getKpis: () => DashboardKpis;
@@ -68,6 +68,11 @@ function mapDeployment(item: DeploymentDto): Deployment {
     timestamp: formatRelative(item.created_at),
     cpu: item.cpu,
     requestsPerMin: item.requests_per_min,
+    // Real deployment fields
+    url: item.url ?? null,
+    hostPort: item.host_port ?? null,
+    repoUrl: item.repo_url ?? null,
+    imageTag: item.image_tag ?? null,
   };
 }
 
@@ -220,9 +225,16 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   createDeployment: async (payload) => {
     set((s) => ({ actionLoading: { ...s.actionLoading, deploy: 'create' } }));
     try {
-      const deployment = await cloudpilotApi.createDeployment(payload);
+      const deployment = await cloudpilotApi.createDeployment({
+        name: payload.name,
+        repo_url: payload.repo_url,
+        branch: payload.branch,
+        environment: payload.environment,
+        author: payload.author,
+        port: payload.port,
+      });
       set((s) => ({ deployments: [mapDeployment(deployment), ...s.deployments] }));
-      toast({ title: 'Deployment queued', description: `${deployment.name} is now building.` });
+      toast({ title: 'Deployment queued', description: `${deployment.name} is now building. Watch the logs for progress.` });
     } catch (error) {
       toast({ title: 'Deployment failed', description: error instanceof Error ? error.message : 'Unexpected error', variant: 'destructive' });
     } finally {

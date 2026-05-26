@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from api.routes import alerts, auth, deployments, logs, metrics
+from api.routes import alerts, auth, deployments, logs, metrics, projects
 from api.websockets.stream import router as ws_router
 from core.config import get_settings
 from core.exceptions import register_exception_handlers
@@ -47,7 +47,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -76,6 +76,7 @@ async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
 api_prefix = settings.api_prefix
 app.include_router(auth.router, prefix=api_prefix)
 app.include_router(deployments.router, prefix=api_prefix)
+app.include_router(projects.router, prefix=api_prefix)
 app.include_router(metrics.router, prefix=api_prefix)
 app.include_router(logs.router, prefix=api_prefix)
 app.include_router(alerts.router, prefix=api_prefix)

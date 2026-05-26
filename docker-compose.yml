@@ -1,49 +1,80 @@
-version: "3.9"
-
 services:
+  # ──────────────────────────────────────────────
+  # Backend — FastAPI deployment engine
+  # Docker socket mounted so it can build + run user apps
+  # ──────────────────────────────────────────────
   backend:
     build: ./backend
+    container_name: cloudpilot-backend
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    environment:
+      - BUILD_DIR=/tmp/cloudpilot_builds
+      - CORS_ORIGINS=http://localhost,http://localhost:80,http://localhost:8000,http://localhost:3000,http://localhost:5173
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: always
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock
+      - cloudpilot_builds:/tmp/cloudpilot_builds
+    networks:
+      - cloudpilot
+    restart: on-failure
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 20s
 
+  # ──────────────────────────────────────────────
+  # Frontend — React SPA served by nginx
+  # Proxies /api/* → backend:8000
+  # ──────────────────────────────────────────────
   frontend:
     build: ./frontend
+    container_name: cloudpilot-frontend
+    ports:
+      - "80:80"
     depends_on:
       - backend
-    restart: always
+    networks:
+      - cloudpilot
+    restart: on-failure
 
+  # ──────────────────────────────────────────────
+  # Postgres
+  # ──────────────────────────────────────────────
   postgres:
     image: postgres:15
+    container_name: cloudpilot-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: appdb
+      POSTGRES_USER: cloudpilot
+      POSTGRES_PASSWORD: cloudpilot
+      POSTGRES_DB: cloudpilot
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cloudpilot
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d appdb"]
+      test: ["CMD-SHELL", "pg_isready -U cloudpilot -d cloudpilot"]
       interval: 5s
       timeout: 5s
       retries: 20
-      start_period: 5s
 
+  # ──────────────────────────────────────────────
+  # Redis
+  # ──────────────────────────────────────────────
   redis:
     image: redis:7-alpine
+    container_name: cloudpilot-redis
+    networks:
+      - cloudpilot
     restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -51,16 +82,10 @@ services:
       timeout: 3s
       retries: 5
 
-  nginx:
-    image: nginx:latest
-    ports:
-      - "80:80"
-    volumes:
-      - ./infra/nginx.conf:/etc/nginx/nginx.conf
-    depends_on:
-      - frontend
-      - backend
-    restart: always
-
 volumes:
   postgres_data:
+  cloudpilot_builds:
+
+networks:
+  cloudpilot:
+    driver: bridge

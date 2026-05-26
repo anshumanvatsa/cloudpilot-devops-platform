@@ -14,3 +14,6 @@ python-multipart==0.0.20
 slowapi==0.1.9
 httpx==0.28.1
 requests==2.32.3
+# Real deployment engine dependencies
+GitPython==3.1.43
+aiofiles==24.1.0

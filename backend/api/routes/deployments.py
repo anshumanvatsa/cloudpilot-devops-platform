@@ -32,23 +32,39 @@ def create_deployment(
 
 @router.post("/{deployment_id}/restart", response_model=DeploymentResponse)
 @limiter.limit("20/minute")
-def restart_deployment(
+async def restart_deployment(
     request: Request,
     deployment_id: int,
     _: None = Depends(validate_csrf_token),
     admin_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    return DeploymentService.restart_deployment(deployment_id, db)
+    return await DeploymentService.restart_deployment(deployment_id, db)
 
 
 @router.post("/{deployment_id}/rollback", response_model=DeploymentResponse)
 @limiter.limit("20/minute")
-def rollback_deployment(
+async def rollback_deployment(
     request: Request,
     deployment_id: int,
     _: None = Depends(validate_csrf_token),
     admin_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    return DeploymentService.rollback_deployment(deployment_id, db)
+    return await DeploymentService.rollback_deployment(deployment_id, db)
+
+
+@router.get("/{deployment_id}/logs")
+@limiter.limit("60/minute")
+def get_deployment_logs(
+    request: Request,
+    deployment_id: int,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from models.deployment import Deployment
+    dep = db.query(Deployment).filter(Deployment.id == deployment_id).first()
+    if not dep:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    return {"deployment_id": deployment_id, "logs": dep.build_log or ""}

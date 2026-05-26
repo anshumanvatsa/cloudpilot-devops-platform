@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
+  FolderOpen,
   LayoutDashboard,
   Rocket,
   Activity,
@@ -15,7 +16,8 @@ import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+  { icon: FolderOpen, label: 'Projects', path: '/' },
+  { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
   { icon: Rocket, label: 'Deployments', path: '/deployments' },
   { icon: Activity, label: 'Monitoring', path: '/monitoring' },
   { icon: ScrollText, label: 'Logs', path: '/logs' },
@@ -68,7 +70,8 @@ export function AppSidebar() {
       {/* Nav */}
       <nav className="flex-1 py-4 px-2 space-y-1">
         {navItems.map((item) => {
-          const active = location.pathname === item.path;
+          const active = location.pathname === item.path || 
+            (item.path === '/' && location.pathname === '/projects');
           return (
             <Link
               key={item.path}
