@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,10 +37,13 @@ class Settings(BaseSettings):
         """Parse the comma-separated cors_origins string into a list."""
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
-    def normalize_database_url_value(self) -> str:
-        if self.database_url.startswith("postgresql://"):
-            return self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        return self.database_url
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        """Ensure psycopg v3 driver is used — convert postgresql:// → postgresql+psycopg://"""
+        if isinstance(value, str) and value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
 
 
 @lru_cache
