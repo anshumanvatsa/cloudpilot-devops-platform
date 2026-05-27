@@ -20,7 +20,7 @@ def list_deployments(request: Request, _: User = Depends(get_current_user), db: 
 
 @router.post("", response_model=DeploymentResponse)
 @limiter.limit("20/minute")
-def create_deployment(
+async def create_deployment(
     request: Request,
     payload: DeploymentCreate,
     _: None = Depends(validate_csrf_token),
