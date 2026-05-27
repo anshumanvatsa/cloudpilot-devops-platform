@@ -155,7 +155,7 @@ export default function ProjectsPage() {
   const fetchProjects = async () => {
     try {
       const res = await cloudpilotApi.projects();
-      setProjects(res.data);
+      setProjects(res);
     } catch {
       toast({ title: 'Failed to load projects', variant: 'destructive' });
     } finally {
