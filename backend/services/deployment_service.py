@@ -160,7 +160,7 @@ class DeploymentService:
             image_tag = f"cloudpilot/{deployment_name}:{commit_sha}"
             full_log_lines: list[str] = []
 
-            async for line in docker_service.build_image_stream(build_dir, image_tag):
+            async for line in docker_service.build_image_stream(build_dir, image_tag, app_port):
                 await _broadcast(line)
                 full_log_lines.append(line)
 
@@ -185,7 +185,9 @@ class DeploymentService:
                 ),
             )
 
-            public_url = f"http://localhost:{host_port}"
+            from core.config import get_settings
+            public_base = get_settings().public_base_url.rstrip("/")
+            public_url = f"{public_base}:{host_port}"
             elapsed = round(time.time() - start_time, 1)
             duration_str = f"{elapsed}s"
 

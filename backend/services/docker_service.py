@@ -1,22 +1,22 @@
 """
-docker_service.py — Core Docker + Git integration for real deployments.
+docker_service.py — Vercel-style auto-detecting deployment engine.
 
-Responsibilities:
-  1. git clone a repo to a temp build directory
-  2. docker build an image from that directory
-  3. docker run the image, assigning a free host port
-  4. Stream build logs line-by-line via an async generator
-  5. Stop / remove containers for restart and rollback
-  6. Return container stats (CPU, memory) for real metrics
+Project type detection (no Dockerfile needed):
+  1. Dockerfile exists          → use it as-is
+  2. package.json + vite/react  → npm run build → nginx static
+  3. package.json (other)       → npm install + npm start (Node server)
+  4. requirements.txt           → Python / gunicorn
+  5. index.html (any level)     → pure static → nginx
+  6. Fallback                   → nginx serving whatever is there
 """
 
 import asyncio
+import json
 import logging
 import os
 import shutil
 import socket
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
@@ -43,6 +43,155 @@ def _find_free_port(start: int = 4000, end: int = 9000) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Project type auto-detection (Vercel-style)
+# ---------------------------------------------------------------------------
+
+def detect_project_type(build_dir: Path) -> str:
+    """
+    Inspect the cloned repo and return one of:
+      'dockerfile'  — has a Dockerfile, use it directly
+      'react'       — package.json with vite/react-scripts build
+      'node'        — package.json without a build step (Express, Fastify, etc.)
+      'python'      — requirements.txt or Pipfile
+      'static'      — plain HTML/CSS/JS (no build needed)
+    """
+    if (build_dir / "Dockerfile").exists():
+        return "dockerfile"
+
+    if (build_dir / "package.json").exists():
+        try:
+            pkg = json.loads((build_dir / "package.json").read_text())
+            scripts = pkg.get("scripts", {})
+            deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+            # Has a build script AND uses a bundler → treat as static SPA
+            has_build = "build" in scripts
+            has_bundler = any(k in deps for k in ("vite", "react-scripts", "next", "nuxt", "@vitejs/plugin-react"))
+            if has_build and has_bundler:
+                return "react"
+            # Has start script → Node server
+            if "start" in scripts or "dev" in scripts:
+                return "node"
+        except Exception:
+            pass
+        return "node"
+
+    if (build_dir / "requirements.txt").exists() or (build_dir / "Pipfile").exists():
+        return "python"
+
+    # Any HTML file anywhere → static site
+    if list(build_dir.rglob("index.html")):
+        return "static"
+
+    # Default: serve whatever is there as static
+    return "static"
+
+
+def generate_dockerfile(build_dir: Path, project_type: str, app_port: int) -> None:
+    """
+    Write an auto-generated Dockerfile into build_dir based on the detected type.
+    """
+    dockerfile_path = build_dir / "Dockerfile"
+
+    if project_type == "static":
+        # Find the directory containing index.html (could be root, public/, dist/, etc.)
+        html_files = list(build_dir.rglob("index.html"))
+        if html_files:
+            # Use the shallowest one
+            html_dir = sorted(html_files, key=lambda p: len(p.parts))[0].parent
+            relative = html_dir.relative_to(build_dir)
+            copy_path = f"./{relative}" if str(relative) != "." else "."
+        else:
+            copy_path = "."
+
+        dockerfile_path.write_text(f"""FROM nginx:alpine
+COPY {copy_path} /usr/share/nginx/html
+RUN echo 'server {{ listen {app_port}; location / {{ root /usr/share/nginx/html; try_files $uri $uri/ /index.html; }} }}' > /etc/nginx/conf.d/default.conf
+EXPOSE {app_port}
+CMD ["nginx", "-g", "daemon off;"]
+""")
+
+    elif project_type == "react":
+        # Detect package manager
+        pm = "npm"
+        install_cmd = "npm ci --prefer-offline || npm install"
+        build_cmd = "npm run build"
+
+        # Find output dir from vite/react config
+        out_dir = "dist"
+        try:
+            pkg = json.loads((build_dir / "package.json").read_text())
+            scripts = pkg.get("scripts", {})
+            if "react-scripts" in scripts.get("build", ""):
+                out_dir = "build"
+        except Exception:
+            pass
+
+        dockerfile_path.write_text(f"""FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN {install_cmd}
+COPY . .
+RUN {build_cmd}
+
+FROM nginx:alpine
+COPY --from=builder /app/{out_dir} /usr/share/nginx/html
+RUN echo 'server {{ listen {app_port}; location / {{ root /usr/share/nginx/html; try_files $uri $uri/ /index.html; }} }}' > /etc/nginx/conf.d/default.conf
+EXPOSE {app_port}
+CMD ["nginx", "-g", "daemon off;"]
+""")
+
+    elif project_type == "node":
+        dockerfile_path.write_text(f"""FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --prefer-offline || npm install --production
+COPY . .
+ENV PORT={app_port}
+ENV NODE_ENV=production
+EXPOSE {app_port}
+CMD ["node", "$(node -e \\"const p=require('./package.json');console.log(p.main||'index.js')\\")"]
+""")
+        # Simpler fallback if main detection is tricky
+        main_file = "index.js"
+        try:
+            pkg = json.loads((build_dir / "package.json").read_text())
+            scripts = pkg.get("scripts", {})
+            main_file = pkg.get("main", "index.js")
+            start_script = scripts.get("start", f"node {main_file}")
+        except Exception:
+            start_script = f"node {main_file}"
+
+        dockerfile_path.write_text(f"""FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --prefer-offline || npm install --production
+COPY . .
+ENV PORT={app_port}
+ENV NODE_ENV=production
+EXPOSE {app_port}
+CMD {json.dumps(["sh", "-c", start_script])}
+""")
+
+    elif project_type == "python":
+        # Detect entry point
+        entry = "app.py"
+        for candidate in ["app.py", "main.py", "server.py", "wsgi.py", "run.py"]:
+            if (build_dir / candidate).exists():
+                entry = candidate
+                break
+
+        dockerfile_path.write_text(f"""FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt* ./
+RUN pip install --no-cache-dir -r requirements.txt 2>/dev/null || true
+COPY . .
+ENV PORT={app_port}
+EXPOSE {app_port}
+CMD ["python", "{entry}"]
+""")
+
+
+# ---------------------------------------------------------------------------
 # Git helpers
 # ---------------------------------------------------------------------------
 
@@ -52,9 +201,6 @@ def clone_repo(repo_url: str, branch: str, build_dir: Path) -> str:
     Returns the short HEAD commit SHA.
     """
     logger.info("Cloning %s @ %s → %s", repo_url, branch, build_dir)
-
-    # Support both HTTPS and SSH; for private repos the user must pre-configure
-    # an SSH key or pass a token in the URL.
     cmd = [
         "git", "clone",
         "--depth", "1",
@@ -64,7 +210,11 @@ def clone_repo(repo_url: str, branch: str, build_dir: Path) -> str:
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if result.returncode != 0:
-        raise RuntimeError(f"git clone failed:\n{result.stderr}")
+        # Try without --branch (some repos use 'master' or other defaults)
+        cmd_no_branch = ["git", "clone", "--depth", "1", repo_url, str(build_dir)]
+        result2 = subprocess.run(cmd_no_branch, capture_output=True, text=True, timeout=120)
+        if result2.returncode != 0:
+            raise RuntimeError(f"git clone failed:\n{result.stderr}\n{result2.stderr}")
 
     sha_result = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
@@ -76,17 +226,28 @@ def clone_repo(repo_url: str, branch: str, build_dir: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Docker build (async streaming)
+# Docker build (async streaming) — with auto-detection
 # ---------------------------------------------------------------------------
 
 async def build_image_stream(
     build_dir: Path,
     image_tag: str,
+    app_port: int = 3000,
 ) -> AsyncIterator[str]:
     """
-    Run `docker build` and yield each log line as it arrives.
+    Auto-detect project type, generate Dockerfile if needed, then
+    run `docker build` and yield each log line as it arrives.
     Raises RuntimeError if the build fails.
     """
+    # Auto-detect and generate Dockerfile if missing
+    if not (build_dir / "Dockerfile").exists():
+        project_type = detect_project_type(build_dir)
+        yield f"📋 Detected project type: {project_type} (auto-generating Dockerfile)"
+        generate_dockerfile(build_dir, project_type, app_port)
+        yield f"✅ Dockerfile generated for {project_type} project"
+    else:
+        yield "📋 Using existing Dockerfile"
+
     cmd = [
         "docker", "build",
         "--tag", image_tag,
@@ -136,12 +297,8 @@ def run_container(
         "--name", container_name,
         "--restart", "unless-stopped",
         "--publish", f"{host_port}:{app_port}",
-        # Traefik labels so traffic can be routed by subdomain later
         "--label", "cloudpilot.managed=true",
         "--label", f"cloudpilot.service={container_name}",
-        "--label", f"traefik.enable=true",
-        "--label", f"traefik.http.routers.{container_name}.rule=Host(`{container_name}.localhost`)",
-        "--label", f"traefik.http.services.{container_name}.loadbalancer.server.port={app_port}",
         *env_flags,
         image_tag,
     ]
