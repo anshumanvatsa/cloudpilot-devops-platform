@@ -162,7 +162,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     try {
       const payload = await withRetry(() => cloudpilotApi.metrics(), 1);
       set({
-        metrics: payload.points.map((point) => ({
+        metrics: (payload?.points ?? []).map((point) => ({
           time: new Date(point.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
           cpu: point.cpu,
           memory: point.memory,
@@ -193,7 +193,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     try {
       const payload = await withRetry(() => cloudpilotApi.alerts(), 1);
       set({
-        alerts: payload.map((item) => ({
+        alerts: (payload ?? []).map((item) => ({
           id: String(item.id),
           title: item.title,
           message: item.message,
