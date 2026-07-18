@@ -341,10 +341,13 @@ class DeploymentService:
             lambda: docker_service.run_container(image_tag, container_name, app_port),
         )
 
+        from core.config import get_settings
+        public_base = get_settings().public_base_url.rstrip("/")
+        
         deployment.status = "success"
         deployment.container_id = container_id
         deployment.host_port = host_port
-        deployment.url = f"http://localhost:{host_port}"
+        deployment.url = f"{public_base}:{host_port}"
         db.add(Log(
             message=f"[{deployment.name}] Restarted successfully",
             level="info",
@@ -398,12 +401,15 @@ class DeploymentService:
             lambda: docker_service.run_container(previous.image_tag, container_name, app_port),
         )
 
+        from core.config import get_settings
+        public_base = get_settings().public_base_url.rstrip("/")
+        
         current.status = "success"
         current.container_id = container_id
         current.host_port = host_port
         current.image_tag = previous.image_tag
         current.commit = previous.commit
-        current.url = f"http://localhost:{host_port}"
+        current.url = f"{public_base}:{host_port}"
         db.add(Log(
             message=f"[{current.name}] Rolled back to commit {previous.commit}",
             level="warn",
