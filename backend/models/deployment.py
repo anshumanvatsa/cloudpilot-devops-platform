@@ -31,3 +31,4 @@ class Deployment(Base):
     container_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     image_tag: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     build_log: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_summary: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)

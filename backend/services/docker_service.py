@@ -173,21 +173,60 @@ CMD {json.dumps(["sh", "-c", start_script])}
 """)
 
     elif project_type == "python":
-        # Detect entry point
+        # Detect entry point and framework
         entry = "app.py"
-        for candidate in ["app.py", "main.py", "server.py", "wsgi.py", "run.py"]:
+        for candidate in ["main.py", "app.py", "server.py", "wsgi.py", "run.py", "api.py"]:
             if (build_dir / candidate).exists():
                 entry = candidate
                 break
 
-        dockerfile_path.write_text(f"""FROM python:3.11-slim
+        # Read requirements to detect framework
+        req_content = ""
+        req_file = build_dir / "requirements.txt"
+        if req_file.exists():
+            try:
+                req_content = req_file.read_text().lower()
+            except Exception:
+                pass
+
+        is_fastapi = "fastapi" in req_content or "uvicorn" in req_content
+        is_flask = "flask" in req_content or "gunicorn" in req_content
+        is_ml = any(lib in req_content for lib in ["torch", "tensorflow", "transformers", "sklearn", "scikit", "numpy", "pandas"])
+
+        # For ML projects: use a heavier base with pre-installed tools
+        base_image = "python:3.11-slim"
+        extra_apt = ""
+        if is_ml:
+            base_image = "python:3.11"
+            extra_apt = "RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ build-essential && rm -rf /var/lib/apt/lists/*\n"
+
+        # Determine start command
+        if is_fastapi:
+            # Detect the app object (uvicorn main:app or app:app)
+            module = entry.replace(".py", "")
+            start_cmd = f'["uvicorn", "{module}:app", "--host", "0.0.0.0", "--port", "{app_port}"]'
+            extra_req = "\nRUN pip install --no-cache-dir uvicorn[standard] 2>/dev/null || true"
+        elif is_flask:
+            module = entry.replace(".py", "")
+            start_cmd = f'["gunicorn", "--bind", "0.0.0.0:{app_port}", "--workers", "2", "{module}:app"]'
+            extra_req = "\nRUN pip install --no-cache-dir gunicorn 2>/dev/null || true"
+        else:
+            # Plain Python script
+            start_cmd = f'["python", "{entry}"]'
+            extra_req = ""
+
+        dockerfile_path.write_text(f"""FROM {base_image}
 WORKDIR /app
-COPY requirements.txt* ./
-RUN pip install --no-cache-dir -r requirements.txt 2>/dev/null || true
+{extra_apt}
+# Install dependencies first (cached layer)
+COPY requirements*.txt* ./
+RUN pip install --no-cache-dir --upgrade pip && \\
+    pip install --no-cache-dir -r requirements.txt{extra_req}
 COPY . .
 ENV PORT={app_port}
+ENV HOST=0.0.0.0
 EXPOSE {app_port}
-CMD ["python", "{entry}"]
+CMD {start_cmd}
 """)
 
 

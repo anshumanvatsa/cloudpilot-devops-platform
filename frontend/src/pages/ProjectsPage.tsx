@@ -41,7 +41,7 @@ function UrlCopyButton({ url }: { url: string }) {
   );
 }
 
-function ProjectCard({ project, onViewLogs }: { project: ProjectDto; onViewLogs: (id: number, name: string, status: string, url: string | null) => void }) {
+function ProjectCard({ project, onViewLogs }: { project: ProjectDto; onViewLogs: (id: number, name: string, status: string, url: string | null, errorSummary: string | null) => void }) {
   const latest = project.latest;
   const isLive = latest.status === 'success';
   const inProgress = latest.status === 'queued' || latest.status === 'cloning' || latest.status === 'building';
@@ -52,7 +52,7 @@ function ProjectCard({ project, onViewLogs }: { project: ProjectDto; onViewLogs:
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       className="glass-card rounded-2xl p-5 hover:border-primary/30 transition-all duration-200 group cursor-pointer"
-      onClick={() => onViewLogs(latest.id, project.name, latest.status, latest.url)}
+      onClick={() => onViewLogs(latest.id, project.name, latest.status, latest.url, latest.error_summary ?? null)}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-4">
@@ -150,6 +150,7 @@ export default function ProjectsPage() {
     name: string;
     status: string;
     url: string | null;
+    errorSummary: string | null;
   } | null>(null);
 
   const fetchProjects = async () => {
@@ -228,8 +229,8 @@ export default function ProjectsPage() {
             <ProjectCard
               key={project.name}
               project={project}
-              onViewLogs={(id, name, status, url) =>
-                setLogsTarget({ id, name, status, url })
+              onViewLogs={(id, name, status, url, errorSummary) =>
+                setLogsTarget({ id, name, status, url, errorSummary })
               }
             />
           ))}
@@ -250,6 +251,7 @@ export default function ProjectsPage() {
         deploymentName={logsTarget?.name ?? ''}
         status={logsTarget?.status}
         url={logsTarget?.url}
+        errorSummary={logsTarget?.errorSummary ?? undefined}
       />
     </motion.div>
   );

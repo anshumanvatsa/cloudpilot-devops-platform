@@ -24,6 +24,9 @@ export interface Deployment {
   hostPort: number | null;
   repoUrl: string | null;
   imageTag: string | null;
+  // Error details — populated on failure
+  buildLog: string | null;
+  errorSummary: string | null;
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';

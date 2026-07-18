@@ -26,6 +26,9 @@ export interface DeploymentDto {
   url: string | null;
   container_id: string | null;
   image_tag: string | null;
+  // Error details
+  build_log: string | null;
+  error_summary: string | null;
 }
 
 export interface ProjectDto {
@@ -42,6 +45,8 @@ export interface ProjectDto {
     duration: string;
     author: string;
     repo_url: string | null;
+    build_log: string | null;
+    error_summary: string | null;
   };
   total_deployments: number;
   deployments: Array<{

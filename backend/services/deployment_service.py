@@ -37,6 +37,63 @@ logger = logging.getLogger(__name__)
 _build_queues: dict[int, asyncio.Queue] = {}
 
 
+def _classify_error(error_msg: str, log_lines: list[str]) -> str:
+    """Turn a raw exception / build log into a short human-readable summary."""
+    msg = error_msg.lower()
+    full_log = "\n".join(log_lines).lower()
+
+    # Git / clone errors
+    if "git clone" in msg or "repository not found" in full_log:
+        return "Git clone failed — check the repo URL and make sure it is public (or add a deploy key)."
+    if "could not read" in full_log or "authentication" in full_log:
+        return "Git authentication failed — the repo may be private. Use a public repo or add a GitHub deploy key."
+    if "branch" in msg and "not found" in msg:
+        return "Branch not found — check the branch name you entered."
+
+    # Docker build errors
+    if "docker build exited with code" in msg:
+        # Look for the real cause in the log
+        for line in reversed(log_lines):
+            ll = line.lower()
+            if "error" in ll or "failed" in ll or "not found" in ll:
+                return f"Docker build failed: {line.strip()[:200]}"
+        return "Docker build failed — check the build log for details."
+
+    # npm / node errors
+    if "npm err" in full_log or "node_modules" in full_log and "error" in full_log:
+        for line in reversed(log_lines):
+            if "npm err" in line.lower():
+                return f"npm build failed: {line.strip()[:200]}"
+        return "npm install or build failed — check package.json and dependencies."
+
+    # Python / pip errors
+    if "pip" in full_log and ("error" in full_log or "could not" in full_log):
+        for line in reversed(log_lines):
+            ll = line.lower()
+            if "error" in ll and "pip" in ll:
+                return f"pip install failed: {line.strip()[:200]}"
+        return "pip install failed — check requirements.txt for incompatible packages."
+
+    # Memory / resource errors
+    if "memory" in full_log or "killed" in full_log or "oomkilled" in full_log:
+        return "Out of memory during build — the server ran out of RAM. ML/heavy projects need more memory."
+    if "timeout" in msg or "timed out" in msg:
+        return "Build timed out — the project took too long to build. Large ML dependencies can cause this."
+    if "no space left" in full_log:
+        return "Disk full — the server has no space left. Clear old Docker images or upgrade storage."
+
+    # Port / container errors
+    if "docker run" in msg or "container" in msg:
+        return f"Container startup failed: {error_msg[:200]}"
+    if "no free port" in msg:
+        return "No free port available — too many deployments running. Stop some containers first."
+
+    # Generic
+    if error_msg:
+        return error_msg[:300]
+    return "Deployment failed — see build log for details."
+
+
 def get_build_queue(deployment_id: int) -> asyncio.Queue:
     if deployment_id not in _build_queues:
         _build_queues[deployment_id] = asyncio.Queue(maxsize=2000)
@@ -135,6 +192,7 @@ class DeploymentService:
             environment = dep.environment
 
         start_time = time.time()
+        full_log_lines: list[str] = []  # initialised here so except block always has it
 
         try:
             # ── Step 1: clone ──────────────────────────────────────────
@@ -215,20 +273,33 @@ class DeploymentService:
         except Exception as exc:
             logger.exception("Deployment pipeline failed for %s", deployment_id)
             error_msg = str(exc)
+
+            # Generate a human-readable error summary
+            error_summary = _classify_error(error_msg, full_log_lines if 'full_log_lines' in dir() else [])
+
+            # Build full log = everything streamed + the final exception
+            combined_log = "\n".join(full_log_lines) if 'full_log_lines' in locals() else ""
+            if combined_log:
+                combined_log += f"\n\n--- FAILURE REASON ---\n{error_msg}"
+            else:
+                combined_log = error_msg
+
             with SessionLocal() as db:
                 dep = db.query(Deployment).filter(Deployment.id == deployment_id).first()
                 if dep:
                     dep.status = "failed"
                     dep.duration = f"{round(time.time() - start_time, 1)}s"
-                    dep.build_log = error_msg
+                    dep.build_log = combined_log
+                    dep.error_summary = error_summary
                     db.add(Log(
-                        message=f"[{deployment_name}] Deployment failed: {error_msg[:200]}",
+                        message=f"[{deployment_name}] Deployment failed: {error_summary}",
                         level="error",
                         service=deployment_name,
                     ))
                     db.commit()
 
-            await _broadcast(f"❌ Deployment failed: {error_msg}", "error")
+            await _broadcast(f"❌ {error_summary}", "error")
+            await _broadcast(f"📋 Full error: {error_msg}", "error")
             _emit(deployment_id, "__FAILED__")
 
         finally:

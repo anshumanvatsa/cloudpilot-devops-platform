@@ -35,4 +35,8 @@ class DeploymentResponse(BaseModel):
     container_id: Optional[str] = None
     image_tag: Optional[str] = None
 
+    # Error/build details — always returned so frontend can show WHY it failed
+    build_log: Optional[str] = None
+    error_summary: Optional[str] = None
+
     model_config = {"from_attributes": True}

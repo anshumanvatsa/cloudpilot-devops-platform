@@ -73,6 +73,9 @@ function mapDeployment(item: DeploymentDto): Deployment {
     hostPort: item.host_port ?? null,
     repoUrl: item.repo_url ?? null,
     imageTag: item.image_tag ?? null,
+    // Error details
+    buildLog: item.build_log ?? null,
+    errorSummary: item.error_summary ?? null,
   };
 }
 

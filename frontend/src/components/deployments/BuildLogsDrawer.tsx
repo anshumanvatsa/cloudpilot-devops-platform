@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Terminal, CheckCircle2, XCircle, Loader2, ExternalLink, Copy, Check } from 'lucide-react';
-import { connectBuildStream } from '@/services/cloudpilotApi';
+import { X, Terminal, CheckCircle2, XCircle, Loader2, ExternalLink, Copy, Check, AlertTriangle } from 'lucide-react';
+import { connectBuildStream, cloudpilotApi } from '@/services/cloudpilotApi';
 import { cn } from '@/lib/utils';
 
 interface BuildLogsDrawerProps {
@@ -10,6 +10,7 @@ interface BuildLogsDrawerProps {
   deploymentId: number | null;
   deploymentName: string;
   initialLogs?: string;   // Pre-fetched logs for completed deployments
+  errorSummary?: string;  // Human-readable error reason
   status?: string;
   url?: string | null;
 }
@@ -19,6 +20,7 @@ function LogLine({ line }: { line: string }) {
   const isSuccess = /✅|success|done|complete/i.test(line);
   const isStep = /^(🔄|🔨|🚀|🔍|📋)/u.test(line);
   const isWarning = /warn|warning/i.test(line);
+  const isDivider = line.startsWith('---');
 
   return (
     <div
@@ -28,7 +30,8 @@ function LogLine({ line }: { line: string }) {
         isSuccess && 'text-emerald-400',
         isStep && 'text-sky-400 font-medium py-1.5',
         isWarning && !isError && 'text-amber-400',
-        !isError && !isSuccess && !isStep && !isWarning && 'text-muted-foreground',
+        isDivider && 'text-muted-foreground/40 border-t border-border/20 pt-2 mt-1',
+        !isError && !isSuccess && !isStep && !isWarning && !isDivider && 'text-muted-foreground',
       )}
     >
       {line || '\u00a0'}
@@ -42,6 +45,7 @@ export function BuildLogsDrawer({
   deploymentId,
   deploymentName,
   initialLogs,
+  errorSummary,
   status: initialStatus,
   url: initialUrl,
 }: BuildLogsDrawerProps) {
@@ -50,6 +54,7 @@ export function BuildLogsDrawer({
   const [failed, setFailed] = useState(false);
   const [url, setUrl] = useState<string | null>(initialUrl ?? null);
   const [copied, setCopied] = useState(false);
+  const [fetchingLogs, setFetchingLogs] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -59,20 +64,35 @@ export function BuildLogsDrawer({
   useEffect(() => {
     if (!open || !deploymentId) return;
 
+    // Reset state
+    setLines([]);
+    setDone(false);
+    setFailed(false);
+    setUrl(initialUrl ?? null);
+
     // If deployment already completed, show stored logs
-    if (isCompleted && initialLogs) {
-      setLines(initialLogs.split('\n').filter(Boolean));
+    if (isCompleted) {
       setDone(true);
       setFailed(initialStatus === 'failed');
-      setUrl(initialUrl ?? null);
+
+      if (initialLogs) {
+        // Logs were pre-passed from the parent
+        setLines(initialLogs.split('\n').filter(l => l.trim() !== ''));
+      } else {
+        // Fetch stored logs from the API
+        setFetchingLogs(true);
+        cloudpilotApi.getDeploymentLogs(deploymentId)
+          .then(res => {
+            const log = res.data?.logs || '';
+            setLines(log.split('\n').filter((l: string) => l.trim() !== ''));
+          })
+          .catch(() => setLines(['Could not load build logs.']))
+          .finally(() => setFetchingLogs(false));
+      }
       return;
     }
 
     // Otherwise stream live
-    setLines([]);
-    setDone(false);
-    setFailed(false);
-
     const ws = connectBuildStream(
       deploymentId,
       (line) => setLines((prev) => [...prev, line]),
@@ -193,20 +213,42 @@ export function BuildLogsDrawer({
               </motion.div>
             )}
 
-            {/* Failed banner */}
+            {/* Failed banner — shows human-readable reason */}
             {done && failed && (
-              <div className="flex items-center gap-2 px-5 py-3 bg-red-500/10 border-b border-red-500/20 flex-shrink-0">
-                <XCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
-                <span className="text-xs text-red-300">Build failed — check logs above for details</span>
-              </div>
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex-shrink-0 border-b border-red-500/20"
+              >
+                <div className="flex items-start gap-2.5 px-5 py-3 bg-red-500/10">
+                  <AlertTriangle className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-red-300 mb-0.5">Deployment Failed</p>
+                    <p className="text-xs text-red-400/90 leading-relaxed">
+                      {errorSummary || 'Build failed — see logs below for details.'}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
             )}
 
             {/* Log output */}
             <div className="flex-1 overflow-y-auto py-3 font-mono">
-              {lines.length === 0 && !done && (
+              {fetchingLogs && (
+                <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading build logs…
+                </div>
+              )}
+              {!fetchingLogs && lines.length === 0 && !done && (
                 <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   Connecting to build stream…
+                </div>
+              )}
+              {!fetchingLogs && lines.length === 0 && done && (
+                <div className="px-4 py-6 text-xs text-muted-foreground">
+                  No build log available.
                 </div>
               )}
               {lines.map((line, idx) => (

@@ -107,6 +107,8 @@ export default function DeploymentsPage() {
         deploymentName={logsTarget?.name ?? ''}
         status={logsTarget?.status}
         url={logsTarget?.url}
+        initialLogs={logsTarget?.buildLog ?? undefined}
+        errorSummary={logsTarget?.errorSummary ?? undefined}
       />
     </motion.div>
   );
