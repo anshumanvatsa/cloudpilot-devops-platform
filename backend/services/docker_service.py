@@ -30,9 +30,36 @@ BUILD_BASE.mkdir(parents=True, exist_ok=True)
 # Port helpers
 # ---------------------------------------------------------------------------
 
+def _get_docker_used_ports() -> set[int]:
+    """Query Docker for all host ports currently mapped by running containers."""
+    used: set[int] = set()
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Ports}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            # Each line looks like: 0.0.0.0:4000->3000/tcp, 0.0.0.0:4001->8080/tcp
+            for part in line.split(","):
+                part = part.strip()
+                if "->" in part:
+                    host_part = part.split("->")[0]  # e.g. 0.0.0.0:4000
+                    if ":" in host_part:
+                        try:
+                            used.add(int(host_part.split(":")[-1]))
+                        except ValueError:
+                            pass
+    except Exception:
+        pass
+    return used
+
+
 def _find_free_port(start: int = 4000, end: int = 9000) -> int:
-    """Return a free TCP port on the host in [start, end)."""
+    """Return a free TCP port in [start, end) that is not used by Docker or the OS."""
+    docker_used = _get_docker_used_ports()
     for port in range(start, end):
+        if port in docker_used:
+            continue
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             try:
                 sock.bind(("0.0.0.0", port))
@@ -45,6 +72,35 @@ def _find_free_port(start: int = 4000, end: int = 9000) -> int:
 # ---------------------------------------------------------------------------
 # Project type auto-detection (Vercel-style)
 # ---------------------------------------------------------------------------
+
+def _find_app_root(build_dir: Path) -> Path:
+    """
+    Find the actual application root inside a cloned repo.
+    Some repos have their app code one level deep (e.g. my-project/safety-sparkle-vision-main/).
+    Strategy:
+      1. If package.json or requirements.txt exists at root → use root
+      2. Otherwise scan one level of subdirectories for the first one that has
+         package.json, requirements.txt, index.html, or a Dockerfile.
+      3. Fallback: root
+    """
+    # Check root first
+    for marker in ["Dockerfile", "package.json", "requirements.txt", "Pipfile", "index.html"]:
+        if (build_dir / marker).exists():
+            return build_dir
+
+    # Scan immediate subdirectories (alphabetically, prefer shorter names)
+    candidates = sorted(
+        [d for d in build_dir.iterdir() if d.is_dir() and not d.name.startswith(".")],
+        key=lambda p: (len(p.name), p.name),
+    )
+    for sub in candidates:
+        for marker in ["Dockerfile", "package.json", "requirements.txt", "Pipfile", "index.html"]:
+            if (sub / marker).exists():
+                logger.info("App root detected in subdirectory: %s", sub)
+                return sub
+
+    return build_dir
+
 
 def detect_project_type(build_dir: Path) -> str:
     """
@@ -278,11 +334,17 @@ async def build_image_stream(
     run `docker build` and yield each log line as it arrives.
     Raises RuntimeError if the build fails.
     """
+    # ── Subdirectory detection ─────────────────────────────────────────────
+    # Some repos store the app inside a subfolder (e.g. safety-sparkle-vision-main/)
+    app_root = _find_app_root(build_dir)
+    if app_root != build_dir:
+        yield f"📁 App found in subdirectory: {app_root.name}/"
+
     # Auto-detect and generate Dockerfile if missing
-    if not (build_dir / "Dockerfile").exists():
-        project_type = detect_project_type(build_dir)
+    if not (app_root / "Dockerfile").exists():
+        project_type = detect_project_type(app_root)
         yield f"📋 Detected project type: {project_type} (auto-generating Dockerfile)"
-        generate_dockerfile(build_dir, project_type, app_port)
+        generate_dockerfile(app_root, project_type, app_port)
         yield f"✅ Dockerfile generated for {project_type} project"
     else:
         yield "📋 Using existing Dockerfile"
@@ -290,10 +352,10 @@ async def build_image_stream(
     cmd = [
         "docker", "build",
         "--tag", image_tag,
-        "--file", str(build_dir / "Dockerfile"),
-        str(build_dir),
+        "--file", str(app_root / "Dockerfile"),
+        str(app_root),
     ]
-    logger.info("Building image %s from %s", image_tag, build_dir)
+    logger.info("Building image %s from %s", image_tag, app_root)
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
