@@ -215,7 +215,7 @@ class DeploymentService:
 
             # ── Step 2: docker build ───────────────────────────────────
             await _broadcast(f"🔨 Building Docker image...")
-            image_tag = f"cloudpilot/{deployment_name}:{commit_sha}"
+            image_tag = f"cloudpilot/{deployment_name.lower()}:{commit_sha}"
             full_log_lines: list[str] = []
 
             async for line in docker_service.build_image_stream(build_dir, image_tag, app_port):
